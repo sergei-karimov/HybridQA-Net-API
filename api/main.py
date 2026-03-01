@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .routes import router
 from utils.logger import setup_logger
@@ -99,6 +100,11 @@ app.add_middleware(
 
 # ----------------------------------------------------------------- Routes
 app.include_router(router, prefix="/api/v1")
+
+# ----------------------------------------------------------------- Static UI
+_ui_dir = Path(__file__).parent.parent / "ui" / "web"
+if _ui_dir.exists():
+    app.mount("/ui", StaticFiles(directory=str(_ui_dir), html=True), name="ui")
 
 
 # ----------------------------------------------------------------- Error handlers

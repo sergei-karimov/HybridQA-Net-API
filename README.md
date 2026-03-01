@@ -52,6 +52,16 @@
 "Шахматный узор должен отсутствовать" → "Шахматный узор"
 ```
 
+После CLIP-скоринга применяется **spatial boost**: если запрос содержит пространственное слово, регионы в соответствующей части изображения получают множитель ×1.15 при выборе `best_region`. Значения `confidence` и `all_similarities` остаются исходными.
+
+| Ключевые слова | Регионы с бустом |
+|---|---|
+| `внизу`, `снизу`, `нижн…` | `bottom-left`, `bottom-center`, `bottom-right` |
+| `сверху`, `наверху`, `верхн…`, `вверху` | `top-left`, `top-center`, `top-right` |
+| `слева`, `левый/ая/ое` | `top-left`, `center-left`, `bottom-left` |
+| `справа`, `правый/ая/ое` | `top-right`, `center-right`, `bottom-right` |
+| `в центре`, `по центру`, `посередине`, `центральн…` | `center`, `top-center`, `bottom-center` |
+
 ---
 
 ## Быстрый старт
@@ -120,6 +130,37 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Swagger UI: http://localhost:8000/docs
+
+### Web UI
+
+Браузерный интерфейс для тестирования Pipeline B без curl/Swagger:
+
+```
+http://localhost:8000/ui/
+```
+
+- Вкладка **Analyze v2** — загрузить изображение, ввести запрос, нажать «Анализировать»
+- Вкладка **Conditions** — список условий `must`/`must_not`, JSON-результаты
+- Canvas-оверлей поверх изображения: лучший регион — красный, остальные — жёлтый градиент, YOLO-боксы — оранжевые пунктирные прямоугольники
+- Горизонтальные бары схожести по всем регионам
+
+### Rust TUI
+
+Терминальный интерфейс (требует установленного Rust):
+
+```bash
+cd ui/tui
+cargo build --release
+./target/release/hybridqa-tui --url http://localhost:8000 --username admin --password password123
+```
+
+| Клавиша | Действие |
+|---|---|
+| `a` | Автовход с CLI-аргументами |
+| `Tab` | Переключение поля: путь → запрос → кнопка |
+| `Enter` | Отправить запрос (фокус на кнопке) |
+| `c` | Включить/выключить кэш |
+| `q` / `Esc` | Выход |
 
 ### Docker
 
@@ -339,6 +380,12 @@ HybridQA-Net/
 ├── utils/
 │   ├── logger.py                # Логирование
 │   └── helpers.py               # Вспомогательные функции
+├── ui/
+│   ├── web/
+│   │   └── index.html           # Web UI (тёмная тема, canvas overlay, бары)
+│   └── tui/
+│       ├── Cargo.toml           # Rust TUI зависимости
+│       └── src/main.rs          # ratatui: grid table + bar chart
 ├── tests/                       # Тесты
 ├── configs/config.yaml          # Конфигурация
 ├── example_usage.py             # Пример использования

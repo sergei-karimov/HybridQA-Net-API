@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HybridQA-Net UI</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232634;
+    --border: #2e3247;
+    --accent: #4f7ef8;
+    --accent-hover: #6b94ff;
+    --text: #e2e8f0;
+    --text-muted: #8892a4;
+    --pass: #22c55e;
+    --fail: #ef4444;
+    --warn: #f59e0b;
+    --red-overlay: rgba(220,50,50,0.85);
+    --yellow-overlay: rgba(245,158,11,0.85);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---- Login overlay ---- */
+  #login-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(15,17,23,0.97);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 36px 40px;
+    width: 340px;
+  }
+  .login-box h2 { margin-bottom: 24px; color: var(--accent); font-size: 1.3rem; }
+  .login-box label { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 12px; }
+  .login-box input {
+    width: 100%; padding: 9px 12px; margin-bottom: 14px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 14px;
+  }
+  .login-box input:focus { outline: none; border-color: var(--accent); }
+  #login-error { color: var(--fail); font-size: 12px; margin-bottom: 10px; min-height: 18px; }
+
+  /* ---- Header / tabs ---- */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex; align-items: center; gap: 24px;
+    height: 52px; flex-shrink: 0;
+  }
+  header h1 { font-size: 1rem; color: var(--accent); font-weight: 700; margin-right: 16px; }
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    padding: 6px 18px; border-radius: 6px; cursor: pointer;
+    color: var(--text-muted); transition: all .15s;
+    background: transparent; border: none; font-size: 13px; font-weight: 500;
+  }
+  .tab.active { background: var(--accent); color: #fff; }
+  .tab:hover:not(.active) { background: var(--surface2); color: var(--text); }
+  #user-badge {
+    margin-left: auto; color: var(--text-muted); font-size: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #user-badge span { color: var(--text); font-weight: 500; }
+
+  /* ---- Main layout ---- */
+  .main {
+    display: flex; flex: 1; overflow: hidden;
+  }
+
+  /* ---- Left panel ---- */
+  .panel-left {
+    width: 320px; flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 20px 16px;
+    display: flex; flex-direction: column; gap: 14px;
+    overflow-y: auto;
+  }
+  .panel-left label { display: block; color: var(--text-muted); font-size: 11px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .5px; }
+
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px; padding: 24px 12px;
+    text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s;
+    color: var(--text-muted); font-size: 13px;
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent); background: rgba(79,126,248,0.07);
+    color: var(--text);
+  }
+  .drop-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .drop-zone .dz-icon { font-size: 2rem; margin-bottom: 8px; display: block; }
+  #file-name { font-size: 11px; color: var(--pass); margin-top: 6px; word-break: break-all; }
+
+  textarea {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 13px;
+    padding: 9px 12px; resize: vertical; font-family: inherit;
+    min-height: 80px;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+
+  .toggle-row { display: flex; align-items: center; gap: 8px; }
+  .toggle {
+    position: relative; width: 36px; height: 20px; cursor: pointer;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .toggle-slider {
+    position: absolute; inset: 0; background: var(--border); border-radius: 20px;
+    transition: background .2s;
+  }
+  .toggle-slider::before {
+    content: ''; position: absolute; height: 14px; width: 14px;
+    left: 3px; top: 3px; background: white; border-radius: 50%;
+    transition: transform .2s;
+  }
+  .toggle input:checked + .toggle-slider { background: var(--accent); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+
+  /* Conditions list */
+  #conditions-list { display: flex; flex-direction: column; gap: 8px; }
+  .cond-item {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .cond-item-row { display: flex; align-items: center; gap: 6px; }
+  .cond-item input[type=text] {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text); font-size: 12px; padding: 5px 8px;
+  }
+  .cond-item select {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text); font-size: 11px; padding: 5px 6px;
+  }
+  .cond-remove {
+    background: none; border: none; color: var(--fail); cursor: pointer;
+    font-size: 16px; line-height: 1; padding: 2px 4px;
+  }
+  .btn-add-cond {
+    background: transparent; border: 1px dashed var(--border);
+    border-radius: 6px; color: var(--text-muted); cursor: pointer;
+    padding: 7px; font-size: 12px; width: 100%;
+    transition: border-color .15s, color .15s;
+  }
+  .btn-add-cond:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Buttons */
+  .btn {
+    width: 100%; padding: 10px; border-radius: 7px; border: none;
+    font-size: 14px; font-weight: 600; cursor: pointer; transition: background .15s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; }
+  .btn-secondary {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- Right panel ---- */
+  .panel-right {
+    flex: 1; display: flex; flex-direction: column;
+    overflow-y: auto; padding: 20px;
+    gap: 16px;
+  }
+
+  /* Image + canvas overlay */
+  .img-wrapper {
+    position: relative; display: inline-block;
+    max-width: 100%; line-height: 0;
+    border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  #preview-img {
+    display: block; max-width: 100%; max-height: 420px;
+    object-fit: contain;
+  }
+  #overlay-canvas {
+    position: absolute; top: 0; left: 0;
+    pointer-events: none;
+  }
+  #no-image {
+    width: 100%; min-height: 200px; display: flex; align-items: center;
+    justify-content: center; color: var(--text-muted); font-size: 13px;
+    border: 1px dashed var(--border); border-radius: 8px; background: var(--surface2);
+  }
+
+  /* Verdict badge */
+  .verdict-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .badge {
+    padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .badge-pass { background: rgba(34,197,94,0.15); color: var(--pass); border: 1px solid var(--pass); }
+  .badge-fail { background: rgba(239,68,68,0.15); color: var(--fail); border: 1px solid var(--fail); }
+  .timing { color: var(--text-muted); font-size: 12px; }
+  .cached-tag { font-size: 11px; color: var(--warn); border: 1px solid var(--warn); border-radius: 10px; padding: 2px 8px; }
+
+  /* Normalized query */
+  .info-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 7px; padding: 12px 14px;
+  }
+  .info-box .label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; }
+  .info-box .value { font-size: 13px; color: var(--text); }
+
+  /* Similarity bars */
+  .bars-container { display: flex; flex-direction: column; gap: 6px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; }
+  .bar-region {
+    width: 90px; flex-shrink: 0; font-size: 11px; font-weight: 600;
+    color: var(--text-muted); text-align: right; font-family: monospace;
+  }
+  .bar-track { flex: 1; height: 20px; background: var(--surface2); border-radius: 4px; position: relative; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+  .bar-val { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 700; font-family: monospace; }
+  .bar-best .bar-fill { background: var(--fail); }
+  .bar-above .bar-fill { background: var(--warn); }
+  .bar-below .bar-fill { background: var(--border); }
+  .bar-best .bar-region { color: var(--fail); }
+  .bar-best .bar-val { color: #fff; }
+  .bar-above .bar-val { color: #fff; }
+  .bar-below .bar-val { color: var(--text-muted); }
+
+  /* Conditions table */
+  .cond-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cond-table th {
+    text-align: left; padding: 8px 10px;
+    border-bottom: 2px solid var(--border); color: var(--text-muted);
+    font-size: 11px; text-transform: uppercase; font-weight: 600;
+  }
+  .cond-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .cond-table tr.pass td { background: rgba(34,197,94,0.05); }
+  .cond-table tr.fail td { background: rgba(239,68,68,0.05); }
+  .cond-table .pass-icon { color: var(--pass); font-weight: 700; }
+  .cond-table .fail-icon { color: var(--fail); font-weight: 700; }
+  .cond-type { font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 600; }
+  .cond-type-must { background: rgba(79,126,248,0.2); color: var(--accent); }
+  .cond-type-must-not { background: rgba(239,68,68,0.2); color: var(--fail); }
+
+  .section-title {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--text-muted); font-weight: 600; margin-bottom: 6px;
+  }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hidden { display: none !important; }
+
+  .summary-row {
+    display: flex; gap: 12px; flex-wrap: wrap;
+  }
+  .summary-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
+    padding: 10px 16px; min-width: 100px;
+  }
+  .summary-card .sc-num { font-size: 1.5rem; font-weight: 700; }
+  .summary-card .sc-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .sc-pass .sc-num { color: var(--pass); }
+  .sc-fail .sc-num { color: var(--fail); }
+</style>
+</head>
+<body>
+
+<!-- Login overlay -->
+<div id="login-overlay">
+  <div class="login-box">
+    <h2>HybridQA-Net</h2>
+    <label>Пользователь</label>
+    <input type="text" id="login-user" value="admin" autocomplete="username">
+    <label>Пароль</label>
+    <input type="password" id="login-pass" value="password123" autocomplete="current-password">
+    <div id="login-error"></div>
+    <button class="btn btn-primary" onclick="doLogin()">Войти</button>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <h1>HybridQA-Net</h1>
+  <div class="tabs">
+    <button class="tab active" data-tab="v2" onclick="switchTab('v2')">Analyze v2</button>
+    <button class="tab" data-tab="conditions" onclick="switchTab('conditions')">Conditions</button>
+  </div>
+  <div id="user-badge">
+    Вход выполнен как <span id="username-display">—</span>
+    <button class="btn-secondary btn" style="width:auto;padding:4px 12px;font-size:12px;" onclick="doLogout()">Выйти</button>
+  </div>
+</header>
+
+<!-- Main -->
+<div class="main">
+  <!-- Left panel -->
+  <div class="panel-left">
+    <!-- File picker -->
+    <div>
+      <label>Изображение</label>
+      <div class="drop-zone" id="drop-zone">
+        <span class="dz-icon">🖼</span>
+        Перетащите файл или нажмите для выбора
+        <input type="file" id="file-input" accept="image/*" onchange="onFileSelected(this)">
+      </div>
+      <div id="file-name"></div>
+    </div>
+
+    <!-- Query (tab v2) -->
+    <div id="query-section">
+      <label>Запрос</label>
+      <textarea id="query-input" rows="4" placeholder="Должен быть виден штрих-код..."></textarea>
+    </div>
+
+    <!-- Conditions list (tab conditions) -->
+    <div id="conditions-section" class="hidden">
+      <label>Условия (max 20)</label>
+      <div id="conditions-list"></div>
+      <button class="btn-add-cond" onclick="addCondition()">+ Добавить условие</button>
+    </div>
+
+    <!-- Cache toggle -->
+    <div class="toggle-row">
+      <label class="toggle">
+        <input type="checkbox" id="use-cache" checked>
+        <span class="toggle-slider"></span>
+      </label>
+      <span style="font-size:13px; color:var(--text-muted)">Использовать кэш</span>
+    </div>
+
+    <!-- Submit -->
+    <button class="btn btn-primary" id="submit-btn" onclick="doSubmit()">
+      <span id="submit-label">Анализировать</span>
+      <span id="submit-spinner" class="spinner hidden"></span>
+    </button>
+  </div>
+
+  <!-- Right panel -->
+  <div class="panel-right">
+    <!-- Image preview -->
+    <div>
+      <div class="section-title">Предпросмотр</div>
+      <div id="no-image">Изображение не выбрано</div>
+      <div class="img-wrapper hidden" id="img-wrapper">
+        <img id="preview-img" alt="Preview" onload="onImgLoaded()">
+        <canvas id="overlay-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Results area (hidden until result) -->
+    <div id="result-area" class="hidden">
+      <!-- Verdict row -->
+      <div id="verdict-section">
+        <div class="section-title">Вердикт</div>
+        <div class="verdict-row">
+          <span id="verdict-badge" class="badge">—</span>
+          <span id="timing" class="timing"></span>
+          <span id="cached-tag" class="cached-tag hidden">кэш</span>
+        </div>
+      </div>
+
+      <!-- Normalized query (v2 only) -->
+      <div id="norm-query-section" class="info-box hidden">
+        <div class="label">Нормализованный запрос (отправлен в CLIP)</div>
+        <div class="value" id="norm-query-value"></div>
+      </div>
+
+      <!-- Similarity bars -->
+      <div id="bars-section" class="hidden">
+        <div class="section-title">Схожесть по регионам</div>
+        <div class="bars-container" id="bars-container"></div>
+      </div>
+
+      <!-- Conditions summary -->
+      <div id="cond-summary-section" class="hidden">
+        <div class="section-title">Итог по условиям</div>
+        <div class="summary-row" id="cond-summary-row"></div>
+      </div>
+
+      <!-- Conditions table -->
+      <div id="cond-table-section" class="hidden">
+        <div class="section-title">Результаты условий</div>
+        <table class="cond-table">
+          <thead>
+            <tr>
+              <th>ID</th><th>Тип</th><th>Запрос</th>
+              <th>Результат</th><th>Conf</th>
+            </tr>
+          </thead>
+          <tbody id="cond-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== State =====
+const state = {
+  token: null,
+  username: null,
+  file: null,
+  naturalW: 1, naturalH: 1,
+  lastResult: null,
+  activeTab: 'v2',
+  condIdCounter: 0,
+};
+
+const BASE = window.location.origin;
+
+// ===== Zone grid map =====
+const ZONE_GRID = {
+  'top-left':      [0,0], 'top-center':    [0,1], 'top-right':     [0,2],
+  'center-left':   [1,0], 'center':        [1,1], 'center-right':  [1,2],
+  'bottom-left':   [2,0], 'bottom-center': [2,1], 'bottom-right':  [2,2],
+};
+
+// ===== Login / Auth =====
+async function doLogin() {
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  try {
+    const res = await fetch(`${BASE}/api/v1/auth/token`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: user, password: pass}),
+    });
+    if (!res.ok) { errEl.textContent = 'Неверный логин или пароль'; return; }
+    const data = await res.json();
+    state.token = data.access_token;
+    state.username = user;
+    document.getElementById('login-overlay').classList.add('hidden');
+    document.getElementById('username-display').textContent = user;
+  } catch(e) {
+    errEl.textContent = 'Ошибка соединения: ' + e.message;
+  }
+}
+
+function doLogout() {
+  state.token = null;
+  state.username = null;
+  document.getElementById('login-overlay').classList.remove('hidden');
+}
+
+// Enter key in login
+document.getElementById('login-pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+
+// ===== Tabs =====
+function switchTab(tab) {
+  state.activeTab = tab;
+  document.querySelectorAll('.tab').forEach(el => {
+    el.classList.toggle('active', el.dataset.tab === tab);
+  });
+  document.getElementById('query-section').classList.toggle('hidden', tab !== 'v2');
+  document.getElementById('conditions-section').classList.toggle('hidden', tab !== 'conditions');
+  document.getElementById('result-area').classList.add('hidden');
+  clearOverlay();
+}
+
+// ===== File handling =====
+function onFileSelected(input) {
+  if (!input.files.length) return;
+  state.file = input.files[0];
+  document.getElementById('file-name').textContent = state.file.name;
+  const url = URL.createObjectURL(state.file);
+  const img = document.getElementById('preview-img');
+  img.src = url;
+  document.getElementById('no-image').classList.add('hidden');
+  document.getElementById('img-wrapper').classList.remove('hidden');
+}
+
+function onImgLoaded() {
+  const img = document.getElementById('preview-img');
+  state.naturalW = img.naturalWidth;
+  state.naturalH = img.naturalHeight;
+  if (state.lastResult && state.lastResult.grid_regions) {
+    drawOverlay(state.lastResult, state.naturalW, state.naturalH);
+  }
+}
+
+// Drag-and-drop
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) {
+    state.file = f;
+    document.getElementById('file-name').textContent = f.name;
+    const url = URL.createObjectURL(f);
+    document.getElementById('preview-img').src = url;
+    document.getElementById('no-image').classList.add('hidden');
+    document.getElementById('img-wrapper').classList.remove('hidden');
+  }
+});
+
+// ===== Conditions UI =====
+function addCondition() {
+  const list = document.getElementById('conditions-list');
+  if (list.children.length >= 20) return;
+  const id = 'c' + (++state.condIdCounter);
+  const div = document.createElement('div');
+  div.className = 'cond-item';
+  div.dataset.id = id;
+  div.innerHTML = `
+    <div class="cond-item-row">
+      <select>
+        <option value="must">must</option>
+        <option value="must_not">must_not</option>
+      </select>
+      <button class="cond-remove" onclick="this.closest('.cond-item').remove()">×</button>
+    </div>
+    <input type="text" placeholder="Условие..." style="width:100%">
+  `;
+  list.appendChild(div);
+}
+
+function getConditions() {
+  const items = [];
+  document.querySelectorAll('.cond-item').forEach(div => {
+    const q = div.querySelector('input[type=text]').value.trim();
+    if (!q) return;
+    items.push({
+      id: div.dataset.id,
+      query: q,
+      type: div.querySelector('select').value,
+    });
+  });
+  return items;
+}
+
+// ===== Submit =====
+async function doSubmit() {
+  if (!state.file) { alert('Выберите изображение'); return; }
+  if (!state.token) { alert('Необходима авторизация'); return; }
+
+  const btn = document.getElementById('submit-btn');
+  const lbl = document.getElementById('submit-label');
+  const spin = document.getElementById('submit-spinner');
+  btn.disabled = true; lbl.classList.add('hidden'); spin.classList.remove('hidden');
+  clearResults();
+
+  try {
+    if (state.activeTab === 'v2') {
+      const query = document.getElementById('query-input').value.trim() || 'проверь соответствие';
+      const result = await analyzeV2(state.file, query, document.getElementById('use-cache').checked);
+      state.lastResult = result;
+      renderResult(result);
+    } else {
+      const conditions = getConditions();
+      if (!conditions.length) { alert('Добавьте хотя бы одно условие'); return; }
+      const result = await analyzeConditions(state.file, conditions, document.getElementById('use-cache').checked);
+      renderConditionsResult(result);
+    }
+  } catch(e) {
+    alert('Ошибка: ' + e.message);
+  } finally {
+    btn.disabled = false; lbl.classList.remove('hidden'); spin.classList.add('hidden');
+  }
+}
+
+async function analyzeV2(file, query, useCache) {
+  const fd = new FormData();
+  fd.append('image', file, file.name);
+  fd.append('query', query);
+  fd.append('use_cache', useCache ? 'true' : 'false');
+  const res = await fetch(`${BASE}/api/v1/analyze/v2`, {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + state.token},
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || err.error || res.statusText);
+  }
+  return res.json();
+}
+
+async function analyzeConditions(file, conditions, useCache) {
+  const fd = new FormData();
+  fd.append('image', file, file.name);
+  fd.append('conditions_json', JSON.stringify(conditions));
+  fd.append('use_cache', useCache ? 'true' : 'false');
+  const res = await fetch(`${BASE}/api/v1/analyze/v2/conditions`, {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + state.token},
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || err.error || res.statusText);
+  }
+  return res.json();
+}
+
+// ===== Render results =====
+function clearResults() {
+  document.getElementById('result-area').classList.add('hidden');
+  clearOverlay();
+}
+
+function clearOverlay() {
+  const canvas = document.getElementById('overlay-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function renderResult(result) {
+  document.getElementById('result-area').classList.remove('hidden');
+
+  // Verdict
+  const badge = document.getElementById('verdict-badge');
+  badge.textContent = result.verdict;
+  badge.className = 'badge ' + (result.label === 1 ? 'badge-pass' : 'badge-fail');
+
+  document.getElementById('timing').textContent =
+    `${result.processing_time_s.toFixed(2)}s | conf ${result.confidence.toFixed(3)}`;
+
+  const cachedTag = document.getElementById('cached-tag');
+  cachedTag.classList.toggle('hidden', !result.cached);
+
+  // Normalized query
+  if (result.normalized_query !== undefined) {
+    document.getElementById('norm-query-section').classList.remove('hidden');
+    document.getElementById('norm-query-value').textContent =
+      result.normalized_query || '(пустой — все слова нормализованы)';
+  }
+
+  // Bars
+  if (result.all_similarities && result.all_similarities.length) {
+    document.getElementById('bars-section').classList.remove('hidden');
+    renderBars(result.all_similarities, result.best_region, result.threshold);
+  }
+
+  // Sections not needed for v2
+  document.getElementById('cond-summary-section').classList.add('hidden');
+  document.getElementById('cond-table-section').classList.add('hidden');
+
+  // Canvas overlay
+  if (result.grid_regions) {
+    drawOverlay(result, state.naturalW, state.naturalH);
+  }
+}
+
+function renderBars(similarities, bestRegion, threshold) {
+  const container = document.getElementById('bars-container');
+  container.innerHTML = '';
+
+  // Sort descending
+  const sorted = [...similarities].sort((a,b) => b.similarity - a.similarity);
+  const maxSim = Math.max(...sorted.map(s => s.similarity), 0.001);
+
+  for (const s of sorted) {
+    const isBest = s.region_name === bestRegion;
+    const isAbove = !isBest && s.similarity >= threshold;
+    const cls = isBest ? 'bar-best' : (isAbove ? 'bar-above' : 'bar-below');
+    const pct = (s.similarity / maxSim * 100).toFixed(1);
+
+    const row = document.createElement('div');
+    row.className = 'bar-row ' + cls;
+    row.innerHTML = `
+      <div class="bar-region">${s.region_name}</div>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:${pct}%"></div>
+        <span class="bar-val">${s.similarity.toFixed(3)}</span>
+      </div>
+    `;
+    container.appendChild(row);
+  }
+}
+
+function renderConditionsResult(data) {
+  document.getElementById('result-area').classList.remove('hidden');
+
+  // Overall verdict
+  const badge = document.getElementById('verdict-badge');
+  badge.textContent = data.overall_pass ? 'PASS' : 'FAIL';
+  badge.className = 'badge ' + (data.overall_pass ? 'badge-pass' : 'badge-fail');
+
+  document.getElementById('timing').textContent =
+    `${data.total_processing_time_s.toFixed(2)}s`;
+  document.getElementById('cached-tag').classList.add('hidden');
+  document.getElementById('norm-query-section').classList.add('hidden');
+  document.getElementById('bars-section').classList.add('hidden');
+
+  // Summary cards
+  document.getElementById('cond-summary-section').classList.remove('hidden');
+  const summaryRow = document.getElementById('cond-summary-row');
+  summaryRow.innerHTML = `
+    <div class="summary-card"><div class="sc-num">${data.conditions_checked}</div><div class="sc-label">Проверено</div></div>
+    <div class="summary-card sc-pass"><div class="sc-num">${data.conditions_passed}</div><div class="sc-label">Прошло</div></div>
+    <div class="summary-card sc-fail"><div class="sc-num">${data.conditions_failed}</div><div class="sc-label">Не прошло</div></div>
+  `;
+
+  // Table
+  document.getElementById('cond-table-section').classList.remove('hidden');
+  const tbody = document.getElementById('cond-tbody');
+  tbody.innerHTML = '';
+  for (const r of data.results) {
+    const tr = document.createElement('tr');
+    tr.className = r.passed ? 'pass' : 'fail';
+    tr.innerHTML = `
+      <td style="font-family:monospace;font-size:11px">${esc(r.id)}</td>
+      <td><span class="cond-type cond-type-${r.type === 'must' ? 'must' : 'must-not'}">${esc(r.type)}</span></td>
+      <td>${esc(r.query)}</td>
+      <td class="${r.passed ? 'pass-icon' : 'fail-icon'}">${r.passed ? '✓ PASS' : '✗ FAIL'}</td>
+      <td style="font-family:monospace">${r.confidence.toFixed(3)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ===== Canvas overlay =====
+function drawOverlay(result, naturalW, naturalH) {
+  const img = document.getElementById('preview-img');
+  const canvas = document.getElementById('overlay-canvas');
+
+  canvas.width = img.offsetWidth;
+  canvas.height = img.offsetHeight;
+  canvas.style.width = img.offsetWidth + 'px';
+  canvas.style.height = img.offsetHeight + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const cellW = canvas.width / 3;
+  const cellH = canvas.height / 3;
+  const scaleX = canvas.width / naturalW;
+  const scaleY = canvas.height / naturalH;
+
+  const maxSim = Math.max(...result.grid_regions.map(g => g.clip_similarity), 0.001);
+
+  for (const gr of result.grid_regions) {
+    const pos = ZONE_GRID[gr.region_name];
+    if (!pos) continue;
+    const [row, col] = pos;
+    const x = col * cellW, y = row * cellH;
+    const isBest = gr.region_name === result.best_region;
+
+    ctx.fillStyle = isBest
+      ? 'rgba(220,50,50,0.30)'
+      : `rgba(255,200,0,${(gr.clip_similarity / maxSim) * 0.22})`;
+    ctx.fillRect(x, y, cellW, cellH);
+
+    ctx.strokeStyle = isBest ? 'rgba(220,50,50,0.9)' : 'rgba(255,200,0,0.3)';
+    ctx.lineWidth = isBest ? 2 : 1;
+    ctx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
+
+    // Similarity text
+    const fontSize = Math.max(10, Math.round(cellH * 0.12));
+    ctx.fillStyle = isBest ? '#fff' : 'rgba(255,255,255,0.7)';
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gr.clip_similarity.toFixed(3), x + cellW / 2, y + cellH / 2);
+  }
+
+  // YOLO bounding boxes: dashed orange
+  for (const det of (result.yolo_detections || [])) {
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    ctx.strokeStyle = '#ff8c00';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(
+      det.x1 * scaleX, det.y1 * scaleY,
+      (det.x2 - det.x1) * scaleX, (det.y2 - det.y1) * scaleY
+    );
+    // Label
+    if (det.class_name) {
+      ctx.fillStyle = 'rgba(255,140,0,0.85)';
+      const label = `${det.class_name} ${(det.yolo_confidence * 100).toFixed(0)}%`;
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      const tw = ctx.measureText(label).width;
+      const lx = det.x1 * scaleX;
+      const ly = det.y1 * scaleY;
+      ctx.fillRect(lx, ly - 14, tw + 6, 14);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, lx + 3, ly);
+    }
+    ctx.restore();
+  }
+}
+
+// Redraw overlay on resize
+window.addEventListener('resize', () => {
+  if (state.lastResult && state.lastResult.grid_regions) {
+    drawOverlay(state.lastResult, state.naturalW, state.naturalH);
+  }
+});
+</script>
+</body>
+</html>

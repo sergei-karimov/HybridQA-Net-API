@@ -40,6 +40,22 @@ class YoloCLIPResult:
 class YoloCLIPAnalyzer:
     VERDICTS = {0: "Не соответствует стандарту", 1: "Соответствует стандарту"}
 
+    # Spatial boost: rerank regions by directional keywords in the query.
+    # Keys = Russian direction words; values = grid region names to boost.
+    _SPATIAL_BOOST_FACTOR: float = 1.15
+    _SPATIAL_KEYWORDS: list[tuple[list[str], list[str]]] = [
+        (["внизу", "снизу", "нижн"],
+         ["bottom-left", "bottom-center", "bottom-right"]),
+        (["сверху", "наверху", "верхн", "вверху"],
+         ["top-left", "top-center", "top-right"]),
+        (["слева", "левый", "левая", "левое"],
+         ["top-left", "center-left", "bottom-left"]),
+        (["справа", "правый", "правая", "правое"],
+         ["top-right", "center-right", "bottom-right"]),
+        (["в центре", "по центру", "посередине", "середин", "центральн"],
+         ["center", "top-center", "bottom-center"]),
+    ]
+
     def __init__(
         self,
         yolo_model: str = "yolo11n.pt",
@@ -102,10 +118,17 @@ class YoloCLIPAnalyzer:
 
         match_result = self.matcher.match(all_crops, all_names, norm_query)
 
+        # Spatial boost: rerank regions by directional keywords.
+        # label/confidence use the raw CLIP max; only best_region changes.
+        best_region, best_similarity_display = self._apply_spatial_boost(
+            match_result.all_regions, norm_query,
+            raw_best_region=match_result.best_region,
+        )
+
         label = 1 if match_result.best_similarity >= self.threshold else 0
         verdict = self.VERDICTS[label]
 
-        # Build per-region dicts
+        # Build per-region dicts (always raw CLIP similarities)
         region_by_name = {r.region_name: r.similarity for r in match_result.all_regions}
 
         yolo_dicts = [
@@ -147,8 +170,8 @@ class YoloCLIPAnalyzer:
             threshold=self.threshold,
             yolo_detections=yolo_dicts,
             grid_regions=grid_dicts,
-            best_region=match_result.best_region,
-            best_similarity=match_result.best_similarity,
+            best_region=best_region,
+            best_similarity=best_similarity_display,
             all_similarities=all_sims,
             query=query,
             normalized_query=norm_query,
@@ -254,6 +277,39 @@ class YoloCLIPAnalyzer:
             result = re.sub(p, '', result, flags=re.IGNORECASE)
         result = re.sub(r'\s+', ' ', result).strip()
         return result or query  # fallback to original if everything was stripped
+
+    @classmethod
+    def _apply_spatial_boost(
+        cls,
+        regions: list,
+        norm_query: str,
+        raw_best_region: str,
+    ) -> tuple[str, float]:
+        """Return (best_region, best_similarity) after spatial reranking.
+
+        Boosts regions matching directional keywords in the query by
+        _SPATIAL_BOOST_FACTOR, then picks the winner. Raw similarities are
+        NOT modified — only the ranking changes.
+        Returns (raw_best_region, raw_best_similarity) unchanged when no
+        directional keyword is found.
+        """
+        q = norm_query.lower()
+
+        # Build boost map: region_name → multiplicative factor
+        boost_map: dict[str, float] = {}
+        for keywords, region_names in cls._SPATIAL_KEYWORDS:
+            if any(kw in q for kw in keywords):
+                for rname in region_names:
+                    boost_map[rname] = boost_map.get(rname, 1.0) * cls._SPATIAL_BOOST_FACTOR
+
+        if not boost_map:
+            # No spatial keyword — return raw winner
+            raw_sim = next((r.similarity for r in regions if r.region_name == raw_best_region), 0.0)
+            return raw_best_region, raw_sim
+
+        # Pick region with highest boosted score
+        best = max(regions, key=lambda r: r.similarity * boost_map.get(r.region_name, 1.0))
+        return best.region_name, best.similarity
 
     @staticmethod
     def _cache_key(image: Union[bytes, str, Path, Image.Image], query: str) -> str:

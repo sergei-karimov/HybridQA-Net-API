@@ -28,6 +28,7 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6      # File uploads
 pydantic>=2.4.0
+aiofiles>=23.2.1              # StaticFiles async I/O
 
 # ----- Auth -------------------------------------------------
 python-jose[cryptography]>=3.3.0   # JWT
