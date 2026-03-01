@@ -152,3 +152,63 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+# ================================================================= YOLO+CLIP schemas
+class DetectionBox(BaseModel):
+    region_name: str
+    class_name: str
+    class_id: int
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    yolo_confidence: float = Field(ge=0.0, le=1.0)
+    clip_similarity: float = Field(ge=-1.0, le=1.0)
+
+
+class GridRegion(BaseModel):
+    region_name: str
+    clip_similarity: float = Field(ge=-1.0, le=1.0)
+    crop_width: int
+    crop_height: int
+
+
+class SimilarityEntry(BaseModel):
+    region_name: str
+    similarity: float
+
+
+class YoloCLIPResponse(BaseModel):
+    label: int
+    verdict: str
+    confidence: float
+    threshold: float
+    yolo_detections: list[DetectionBox]
+    grid_regions: list[GridRegion]
+    best_region: str
+    best_similarity: float
+    all_similarities: list[SimilarityEntry]
+    query: str
+    processing_time_s: float
+    cached: bool
+
+
+class YoloCLIPConditionResult(BaseModel):
+    id: str
+    query: str
+    type: str
+    passed: bool
+    confidence: float
+    best_region: str
+    best_similarity: float
+    yolo_detections_count: int
+
+
+class YoloCLIPConditionsResponse(BaseModel):
+    overall_pass: bool
+    conditions_checked: int
+    conditions_passed: int
+    conditions_failed: int
+    results: list[YoloCLIPConditionResult]
+    total_processing_time_s: float

@@ -49,12 +49,29 @@ async def lifespan(app: FastAPI):
         logger.error(f"Ошибка инициализации pipeline: {e}", exc_info=True)
         app.state.pipeline = None
 
+    # Инициализируем YOLO+CLIP анализатор (Variant B)
+    try:
+        from src.yolo_clip_pipeline import YoloCLIPAnalyzer
+        app.state.yolo_clip = YoloCLIPAnalyzer(
+            yolo_model="yolo11n.pt",
+            clip_image_model="sentence-transformers/clip-ViT-B-32",
+            clip_text_model="sentence-transformers/clip-ViT-B-32-multilingual-v1",
+            similarity_threshold=0.25,
+            device=None,   # auto-detect GPU
+        )
+        logger.info("YoloCLIPAnalyzer успешно инициализирован.")
+    except Exception as e:
+        logger.error(f"Ошибка инициализации YoloCLIPAnalyzer: {e}", exc_info=True)
+        app.state.yolo_clip = None
+
     yield   # ← Сервер работает
 
     logger.info("Остановка HybridQA-Net API...")
     if hasattr(app.state, "pipeline") and app.state.pipeline:
         # Освободить ресурсы GPU/CPU
         del app.state.pipeline
+    if hasattr(app.state, "yolo_clip"):
+        del app.state.yolo_clip
 
 
 # ================================================================= App

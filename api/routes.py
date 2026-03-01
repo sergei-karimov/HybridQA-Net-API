@@ -35,10 +35,16 @@ from .schemas import (
     BatchAnalyzeResponse,
     ConditionItem,
     ConditionsResponse,
+    DetectionBox,
     ErrorResponse,
+    GridRegion,
     HealthResponse,
+    SimilarityEntry,
     TokenRequest,
     TokenResponse,
+    YoloCLIPConditionResult,
+    YoloCLIPConditionsResponse,
+    YoloCLIPResponse,
 )
 from utils.logger import setup_logger
 
@@ -382,3 +388,180 @@ async def clear_cache(
     """Очистить весь кэш результатов. Требует аутентификации."""
     pipeline.cache.clear()
     return {"message": "Кэш очищен."}
+
+
+# ================================================================= YOLO+CLIP
+def get_yolo_clip(request: Request):
+    analyzer = getattr(request.app.state, "yolo_clip", None)
+    if analyzer is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="YOLO+CLIP анализатор не инициализирован.",
+        )
+    return analyzer
+
+
+@router.post(
+    "/analyze/v2",
+    response_model=YoloCLIPResponse,
+    summary="YOLO+CLIP анализ соответствия (Variant B)",
+    tags=["analysis"],
+    responses={
+        400: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def analyze_v2(
+    request: Request,
+    image: UploadFile = File(description="Изображение продукта (JPEG/PNG/WebP)."),
+    query: str = Form(
+        default="Проверь соответствие продукта стандарту качества",
+        description="Запрос на русском языке.",
+    ),
+    use_cache: bool = Form(default=True),
+    _rate_limit=Depends(rate_limit_middleware),
+    current_user: dict = Depends(get_current_user),
+    analyzer=Depends(get_yolo_clip),
+):
+    """
+    Анализ соответствия через YOLO-детекцию объектов + мультиязычный CLIP.
+    Поддерживает русские запросы без предобучения.
+    """
+    if image.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неподдерживаемый тип изображения: {image.content_type}",
+        )
+
+    image_bytes = await image.read()
+    if len(image_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Размер изображения превышает 20 МБ.",
+        )
+
+    logger.info(
+        f"[v2] Запрос от {current_user.get('sub', 'unknown')}: "
+        f"image={image.filename}, query={query[:80]}"
+    )
+
+    try:
+        result = analyzer.analyze(image_bytes, query, use_cache=use_cache)
+    except Exception as e:
+        logger.error(f"Ошибка analyze_v2: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Внутренняя ошибка: {str(e)}",
+        )
+
+    return YoloCLIPResponse(
+        label=result.label,
+        verdict=result.verdict,
+        confidence=result.confidence,
+        threshold=result.threshold,
+        yolo_detections=[DetectionBox(**d) for d in result.yolo_detections],
+        grid_regions=[GridRegion(**g) for g in result.grid_regions],
+        best_region=result.best_region,
+        best_similarity=result.best_similarity,
+        all_similarities=[SimilarityEntry(**s) for s in result.all_similarities],
+        query=result.query,
+        processing_time_s=result.processing_time_s,
+        cached=result.cached,
+    )
+
+
+@router.post(
+    "/analyze/v2/conditions",
+    response_model=YoloCLIPConditionsResponse,
+    summary="YOLO+CLIP проверка нескольких условий (Variant B)",
+    tags=["analysis"],
+    responses={
+        400: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def analyze_v2_conditions(
+    request: Request,
+    image: UploadFile = File(description="Изображение продукта (JPEG/PNG/WebP)."),
+    conditions_json: str = Form(description="JSON-массив условий [{id, query, type}]."),
+    use_cache: bool = Form(default=True),
+    _rate_limit=Depends(rate_limit_middleware),
+    current_user: dict = Depends(get_current_user),
+    analyzer=Depends(get_yolo_clip),
+):
+    """
+    Проверить список условий через YOLO+CLIP для одного изображения.
+
+    - **image**: Фото продукта (обязательно)
+    - **conditions_json**: JSON-массив `[{id, query, type}]` (max 20)
+    """
+    if image.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Неподдерживаемый тип изображения: {image.content_type}",
+        )
+
+    image_bytes = await image.read()
+    if len(image_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Размер изображения превышает 20 МБ.",
+        )
+
+    try:
+        raw_conditions = json.loads(conditions_json)
+        if not isinstance(raw_conditions, list):
+            raise ValueError("conditions_json должен быть массивом")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Невалидный conditions_json: {exc}",
+        )
+
+    if len(raw_conditions) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="conditions_json не может быть пустым массивом.",
+        )
+    if len(raw_conditions) > 20:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Максимальное число условий: 20.",
+        )
+
+    try:
+        conditions = [ConditionItem(**c) for c in raw_conditions]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Ошибка валидации условий: {exc}",
+        )
+
+    logger.info(
+        f"[v2/conditions] Запрос от {current_user.get('sub', 'unknown')}: "
+        f"{len(conditions)} условий, image={image.filename}"
+    )
+
+    try:
+        agg = analyzer.analyze_conditions(
+            image=image_bytes,
+            conditions=[c.model_dump() for c in conditions],
+            use_cache=use_cache,
+        )
+    except Exception as e:
+        logger.error(f"Ошибка analyze_v2_conditions: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Внутренняя ошибка: {str(e)}",
+        )
+
+    return YoloCLIPConditionsResponse(
+        overall_pass=agg["overall_pass"],
+        conditions_checked=agg["conditions_checked"],
+        conditions_passed=agg["conditions_passed"],
+        conditions_failed=agg["conditions_failed"],
+        results=[YoloCLIPConditionResult(**r) for r in agg["results"]],
+        total_processing_time_s=agg["total_processing_time_s"],
+    )
