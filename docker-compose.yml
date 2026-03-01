@@ -1,0 +1,79 @@
+version: "3.9"
+
+services:
+  # ---- Основной API сервис ----------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: hybridqa-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Монтируем конфиг для удобства изменения без ребилда
+      - ./configs:/app/configs:ro
+      # Логи на хост
+      - ./logs:/app/logs
+      # Чекпоинты моделей
+      - ./checkpoints:/app/checkpoints
+      # HuggingFace кэш (чтобы не перекачивать модели)
+      - huggingface_cache:/home/appuser/.cache/huggingface
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TOKENIZERS_PARALLELISM=false
+      # Переопределение секретного ключа из ENV
+      - AUTH_SECRET_KEY=${AUTH_SECRET_KEY:-CHANGE_ME_IN_PRODUCTION}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - hybridqa_net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ---- Redis кэш --------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: hybridqa-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hybridqa_net
+
+  # ---- Nginx reverse proxy (опционально) --------------------
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: hybridqa-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  #   depends_on:
+  #     - api
+  #   networks:
+  #     - hybridqa_net
+
+volumes:
+  redis_data:
+  huggingface_cache:
+
+networks:
+  hybridqa_net:
+    driver: bridge

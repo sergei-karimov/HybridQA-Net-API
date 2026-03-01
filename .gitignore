@@ -1,0 +1,27 @@
+# Виртуальное окружение
+.venv/
+
+# Данные и чекпоинты (большие файлы)
+data/
+checkpoints/
+models/
+logs/
+
+# HuggingFace кэш
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Среда
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp

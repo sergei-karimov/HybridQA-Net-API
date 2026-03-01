@@ -1,0 +1,66 @@
+model:
+  vision:
+    backbone: "vit_base_patch16_224"   # Варианты: "vit_base_patch16_224", "efficientnet_b7"
+    pretrained: true
+    image_size: 224
+    grad_cam_target_layers: ["blocks.11"]   # Для ViT; для EfficientNet: ["features.8"]
+    feature_dim: 768                        # Размерность признаков изображения
+
+  nlp:
+    # Варианты: "DeepPavlov/rubert-base-cased", "sentence-transformers/LaBSE"
+    model_name: "DeepPavlov/rubert-base-cased"
+    max_length: 512
+    feature_dim: 768
+
+  fusion:
+    embed_dim: 768
+    num_heads: 8
+    num_layers: 4
+    dropout: 0.1
+    num_classes: 2                          # Бинарная классификация
+
+  report:
+    model_name: "cointegrated/rut5-base"    # T5 для русского языка
+    max_input_length: 1024
+    max_output_length: 512
+    num_beams: 4
+
+training:
+  batch_size: 16
+  learning_rate: 1.0e-4
+  epochs: 50
+  warmup_steps: 100
+  weight_decay: 0.01
+  gradient_clip: 1.0
+  checkpoint_dir: "./checkpoints"
+  eval_every: 5                             # Каждые N эпох
+  save_top_k: 3
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  max_image_size_mb: 20
+  allowed_image_types: ["image/jpeg", "image/png", "image/webp"]
+  allowed_doc_types: ["application/pdf", "text/plain"]
+  rate_limit_per_minute: 100
+  auth_secret_key: "CHANGE_ME_IN_PRODUCTION"
+  token_expire_minutes: 60
+
+cache:
+  enabled: true
+  backend: "memory"                         # Варианты: "memory", "redis"
+  redis_url: "redis://localhost:6379/0"
+  ttl_seconds: 3600
+  max_memory_items: 512
+
+device:
+  auto_select: true                         # Автоматически выбрать CPU/CUDA/MPS
+  precision: "fp16"                         # "fp32" или "fp16"
+
+logging:
+  level: "INFO"
+  format: "json"
+  file: "./logs/app.log"
+  max_bytes: 10485760                       # 10 MB
+  backup_count: 5

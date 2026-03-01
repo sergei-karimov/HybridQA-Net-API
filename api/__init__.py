@@ -1,0 +1,1 @@
+"""FastAPI приложение HybridQA-Net."""
