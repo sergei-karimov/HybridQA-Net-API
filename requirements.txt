@@ -17,8 +17,8 @@ sentencepiece>=0.1.99        # T5 токенизатор
 Pillow>=10.0.0
 opencv-python-headless>=4.8.0
 numpy>=1.24.0
-ultralytics>=8.3.0               # YOLO11 support
-sentence-transformers>=2.7.0     # clip-ViT-B-32-multilingual-v1
+ultralytics>=8.3.0               # YOLO11 (yolo11n.pt, auto-download ~6MB)
+sentence-transformers>=2.7.0     # clip-ViT-B-32 (изображения) + clip-ViT-B-32-multilingual-v1 (русский текст)
 
 # ----- NLP / Document parsing -------------------------------
 pypdf>=3.0.0                 # PDF парсинг

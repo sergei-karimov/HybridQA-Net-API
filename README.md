@@ -1,8 +1,10 @@
 # HybridQA-Net
 
-Гибридная мультимодальная система контроля качества на базе Vision Transformer и RuBERT.
+Гибридная мультимодальная система контроля качества. Поддерживает два независимых pipeline: классический (ViT + RuBERT) и нулевого-обучения (YOLO + CLIP).
 
 ## Архитектура
+
+### Pipeline A — HybridQANet (классический, с дообучением)
 
 ```
 Изображение ──► VisionBackbone (ViT/EfficientNet) ──► Патч-признаки
@@ -14,25 +16,66 @@
                                                      ReportGenerator (T5) ──► Отчёт
 ```
 
+| Модели | Назначение |
+|---|---|
+| `vit_base_patch16_224` (timm) | Vision backbone |
+| `DeepPavlov/rubert-base-cased` | NLP анализ текста стандарта |
+| `cointegrated/rut5-base` | Генерация текстового отчёта |
+
+Лучший чекпоинт: `models/production.pt` — val acc **81.53%** (50 эп. freeze + 20 эп. unfreeze).
+
+---
+
+### Pipeline B — YOLO+CLIP (нулевое обучение, Variant B)
+
+```
+Изображение ──► YOLO (yolo11n.pt)      ──► bbox-кропы (до 20)  ─┐
+            └──► 3×3 сетка + full       ──► 10 зон              ─┤
+                                                                  ├──► clip-ViT-B-32 ──► [N, D]
+Запрос (RU) ──► _normalize_query() ──► clip-ViT-B-32-multilingual-v1 ──► [D]
+                                                                  │
+                                          cosine_similarity ──────┘ ──► max → label
+```
+
+| Модели | Назначение |
+|---|---|
+| `yolo11n.pt` (ultralytics, ~6 MB) | Детекция объектов |
+| `sentence-transformers/clip-ViT-B-32` | Кодирование изображений |
+| `sentence-transformers/clip-ViT-B-32-multilingual-v1` | Кодирование русских запросов |
+
+Порог сходства: **0.25** (возвращается в ответе).
+Запросы автоматически нормализуются — нормативные конструкции убираются перед CLIP:
+
+```
+"Шахматный узор должен быть справа" → "Шахматный узор справа"
+"Логотип должен находиться в центре" → "Логотип в центре"
+"Шахматный узор должен отсутствовать" → "Шахматный узор"
+```
+
+---
+
 ## Быстрый старт
 
 ### Установка
 
 ```bash
-# Клонируем репозиторий
-git clone https://github.com/your-org/HybridQA-Net.git
+git clone https://github.com/sergei-karimov/HybridQA-Net-API.git
 cd HybridQA-Net
 
-# Создаём виртуальное окружение
 python -m venv .venv
 source .venv/bin/activate   # Linux/macOS
 # .venv\Scripts\activate    # Windows
 
-# Устанавливаем зависимости
 pip install -r requirements.txt
 ```
 
-### Пример использования
+> **WSL2 / headless**: если возникает ошибка `libGL.so.1`, удалите `opencv-python` и оставьте только headless-версию:
+> ```bash
+> pip uninstall opencv-python -y
+> pip install opencv-python-headless --force-reinstall
+> ```
+
+### Пример использования (Pipeline A)
 
 ```python
 from src.pipeline import HybridQANet
@@ -44,16 +87,26 @@ result = system.analyze(
     query="Проверь соответствие маркировки стандарту",
 )
 
-print(result.report)          # Текстовый отчёт
-print(result.attention_map)   # Numpy массив [H, W]
-print(result.confidence)      # float [0, 1]
-print(result.verdict)         # "Соответствует" / "Не соответствует"
+print(result.verdict)      # "Соответствует" / "Не соответствует"
+print(result.confidence)   # float [0, 1]
+print(result.report)       # Текстовый отчёт
 ```
 
-Запустить полный пример:
+### Пример использования (Pipeline B)
 
-```bash
-python example_usage.py
+```python
+from src.yolo_clip_pipeline import YoloCLIPAnalyzer
+
+analyzer = YoloCLIPAnalyzer()
+result = analyzer.analyze(
+    image="product_photo.jpg",
+    query="Шахматный узор должен быть справа в центральной части",
+)
+
+print(result.verdict)           # "Соответствует стандарту"
+print(result.best_region)       # "center-right"
+print(result.best_similarity)   # 0.29
+print(result.normalized_query)  # "Шахматный узор справа в центральной части"
 ```
 
 ### Запуск API
@@ -62,16 +115,15 @@ python example_usage.py
 # Локально
 uvicorn api.main:app --host 0.0.0.0 --port 8000
 
-# С автоперезагрузкой (для разработки)
+# С автоперезагрузкой (разработка)
 uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Swagger UI доступен по адресу: http://localhost:8000/docs
+Swagger UI: http://localhost:8000/docs
 
 ### Docker
 
 ```bash
-# Собрать и запустить
 docker-compose up --build
 
 # Только API (без Redis)
@@ -79,18 +131,25 @@ docker build -t hybridqa-net .
 docker run -p 8000:8000 hybridqa-net
 ```
 
+---
+
 ## API
 
 ### Аутентификация
 
 ```bash
-# Получить токен
 curl -X POST http://localhost:8000/api/v1/auth/token \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "password123"}'
 ```
 
-### Анализ изображения
+Тестовые пользователи: `admin/password123`, `user/user_password`, `readonly/readonly_pass`.
+
+---
+
+### Pipeline A — классические эндпоинты
+
+#### `POST /api/v1/analyze` — анализ одного изображения
 
 ```bash
 TOKEN="ваш_токен"
@@ -102,7 +161,7 @@ curl -X POST http://localhost:8000/api/v1/analyze \
   -F "standard_text=ГОСТ 123-2020. Требования к маркировке..."
 ```
 
-### Пакетный анализ
+#### `POST /api/v1/analyze/batch` — пакетный анализ (до 32)
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/analyze/batch \
@@ -110,16 +169,60 @@ curl -X POST http://localhost:8000/api/v1/analyze/batch \
   -H "Content-Type: application/json" \
   -d '{
     "items": [
-      {
-        "image_b64": "<base64_image>",
-        "query": "Проверка #1",
-        "standard_text": "Стандарт..."
-      }
+      {"image_b64": "<base64>", "query": "Проверка #1", "standard_text": "Стандарт..."}
     ]
   }'
 ```
 
-## Fine-tuning
+#### `POST /api/v1/analyze/conditions` — проверка нескольких условий (до 20)
+
+```bash
+curl -X POST http://localhost:8000/api/v1/analyze/conditions \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "image=@product_photo.jpg" \
+  -F 'conditions_json=[
+    {"id": "c1", "query": "Маркировка присутствует", "type": "must"},
+    {"id": "c2", "query": "Повреждения упаковки", "type": "must_not"}
+  ]'
+```
+
+---
+
+### Pipeline B — YOLO+CLIP эндпоинты
+
+#### `POST /api/v1/analyze/v2` — анализ через YOLO+CLIP
+
+```bash
+curl -X POST http://localhost:8000/api/v1/analyze/v2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "image=@product_photo.jpg" \
+  -F 'query=Шахматный узор должен быть справа в центральной части'
+```
+
+Ответ содержит:
+- `label`, `verdict`, `confidence`, `threshold`
+- `best_region`, `best_similarity` — лучшая зона
+- `all_similarities` — схожесть по всем зонам (по убыванию)
+- `yolo_detections` — bbox-объекты с YOLO-уверенностью и CLIP-схожестью
+- `grid_regions` — 10 зон (9 из сетки + full)
+- `query` — оригинальный запрос
+- `normalized_query` — запрос после нормализации (что реально отправлено в CLIP)
+
+#### `POST /api/v1/analyze/v2/conditions` — YOLO+CLIP, несколько условий
+
+```bash
+curl -X POST http://localhost:8000/api/v1/analyze/v2/conditions \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "image=@product_photo.jpg" \
+  -F 'conditions_json=[
+    {"id": "c1", "query": "Шахматный узор в правой части", "type": "must"},
+    {"id": "c2", "query": "Шахматный узор должен отсутствовать", "type": "must_not"}
+  ]'
+```
+
+---
+
+## Fine-tuning (Pipeline A)
 
 ### Структура датасета
 
@@ -127,8 +230,6 @@ curl -X POST http://localhost:8000/api/v1/analyze/batch \
 data/
 ├── train/
 │   ├── images/
-│   │   ├── product_001.jpg
-│   │   └── ...
 │   └── annotations.json
 └── val/
     ├── images/
@@ -150,6 +251,12 @@ data/
 
 `label`: `1` = соответствует, `0` = не соответствует.
 
+### Генерация синтетического датасета
+
+```bash
+python tools/generate_dataset.py --count 300
+```
+
 ### Запуск обучения
 
 ```python
@@ -166,33 +273,36 @@ val_ds = QADataset("data", split="val")
 history = trainer.train(
     train_dataset=train_ds,
     val_dataset=val_ds,
-    freeze_backbone=True,   # Обучать только голову
+    freeze_backbone=True,
 )
 ```
+
+---
 
 ## Конфигурация
 
 Файл `configs/config.yaml` — основной конфигурационный файл.
 
-Ключевые параметры:
-
 | Параметр | По умолчанию | Описание |
 |---|---|---|
-| `model.vision.backbone` | `vit_base_patch16_224` | Vision backbone (ViT или EfficientNet) |
+| `model.vision.backbone` | `vit_base_patch16_224` | Vision backbone |
 | `model.nlp.model_name` | `DeepPavlov/rubert-base-cased` | NLP модель |
-| `model.report.model_name` | `cointegrated/rut5-base` | T5 для генерации отчётов |
-| `cache.backend` | `memory` | Бэкенд кэша (`memory` или `redis`) |
+| `model.report.model_name` | `cointegrated/rut5-base` | T5 для отчётов |
+| `cache.backend` | `memory` | `memory` или `redis` |
 | `api.rate_limit_per_minute` | `100` | Rate limit |
+
+---
 
 ## Тесты
 
 ```bash
-# Запуск всех тестов
 python -m pytest tests/ -v
 
 # Только быстрые тесты (без загрузки моделей)
 python -m pytest tests/test_pipeline.py -v
 ```
+
+---
 
 ## Структура проекта
 
@@ -200,37 +310,44 @@ python -m pytest tests/test_pipeline.py -v
 HybridQA-Net/
 ├── src/
 │   ├── vision/
-│   │   ├── backbone.py        # ViT / EfficientNet бэкбон
-│   │   ├── gradcam.py         # Grad-CAM++ визуализация
-│   │   └── preprocessor.py    # Предобработка изображений
+│   │   ├── backbone.py          # ViT / EfficientNet бэкбон
+│   │   ├── gradcam.py           # Grad-CAM++ визуализация
+│   │   ├── preprocessor.py      # Предобработка изображений
+│   │   ├── detector.py          # YOLODetector + 3×3 grid (Variant B)
+│   │   └── clip_matcher.py      # CLIPMatcher: image+text encoders (Variant B)
 │   ├── nlp/
-│   │   ├── context_analyzer.py # RuBERT / LaBSE анализатор
-│   │   └── document_parser.py  # Парсер PDF/TXT
+│   │   ├── context_analyzer.py  # RuBERT / LaBSE анализатор
+│   │   └── document_parser.py   # Парсер PDF/TXT
 │   ├── fusion/
-│   │   ├── cross_attention.py  # Cross-Attention слияние
-│   │   └── decision_head.py    # Классификатор + confidence
+│   │   ├── cross_attention.py   # Cross-Attention слияние
+│   │   └── decision_head.py     # Классификатор + confidence
 │   ├── report/
-│   │   └── generator.py        # T5 генератор отчётов
-│   ├── cache.py                # Кэширование (memory / redis)
-│   └── pipeline.py             # Главный pipeline
+│   │   └── generator.py         # T5 генератор отчётов
+│   ├── cache.py                 # Кэширование (memory / redis)
+│   ├── pipeline.py              # Pipeline A: HybridQANet
+│   └── yolo_clip_pipeline.py    # Pipeline B: YoloCLIPAnalyzer
 ├── api/
-│   ├── main.py                 # FastAPI приложение
-│   ├── routes.py               # API маршруты
-│   ├── middleware.py           # Auth + Rate limiting
-│   └── schemas.py              # Pydantic схемы
+│   ├── main.py                  # FastAPI приложение (оба pipeline)
+│   ├── routes.py                # Маршруты v1 и v2
+│   ├── middleware.py            # Auth + Rate limiting
+│   └── schemas.py               # Pydantic схемы
 ├── training/
-│   ├── dataset.py              # PyTorch Dataset
-│   └── trainer.py              # Цикл обучения
+│   ├── dataset.py               # PyTorch Dataset
+│   └── trainer.py               # Цикл обучения
+├── tools/
+│   └── generate_dataset.py      # Генерация синтетического датасета
 ├── utils/
-│   ├── logger.py               # Логирование
-│   └── helpers.py              # Вспомогательные функции
-├── tests/                      # Тесты
-├── configs/config.yaml         # Конфигурация
-├── example_usage.py            # Пример использования
-├── Dockerfile                  # Docker образ
-├── docker-compose.yml          # Docker Compose
-└── requirements.txt            # Зависимости
+│   ├── logger.py                # Логирование
+│   └── helpers.py               # Вспомогательные функции
+├── tests/                       # Тесты
+├── configs/config.yaml          # Конфигурация
+├── example_usage.py             # Пример использования
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
 ```
+
+---
 
 ## Лицензия
 
