@@ -25,3 +25,11 @@ build/
 .idea/
 .vscode/
 *.swp
+
+# Rust TUI
+ui/tui/target/
+ui/tui/Cargo.lock
+
+# YOLO weights (auto-downloaded)
+yolo11n.pt
+*.pt
