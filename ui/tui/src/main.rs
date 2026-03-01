@@ -615,10 +615,12 @@ fn main() -> anyhow::Result<()> {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
+                let typing = matches!(app.focused, FocusedField::ImagePath | FocusedField::Query);
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Char('a') => app.do_login(),
-                    KeyCode::Char('c') => {
+                    KeyCode::Esc => break,
+                    KeyCode::Char('q') if !typing => break,
+                    KeyCode::Char('a') if !typing => app.do_login(),
+                    KeyCode::Char('c') if !typing => {
                         app.use_cache = !app.use_cache;
                     }
                     KeyCode::Tab => app.next_focus(),
