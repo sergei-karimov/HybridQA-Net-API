@@ -190,6 +190,7 @@ class YoloCLIPResponse(BaseModel):
     best_similarity: float
     all_similarities: list[SimilarityEntry]
     query: str
+    normalized_query: str
     processing_time_s: float
     cached: bool
 

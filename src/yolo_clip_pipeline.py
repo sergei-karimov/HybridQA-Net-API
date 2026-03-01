@@ -32,6 +32,7 @@ class YoloCLIPResult:
     best_similarity: float
     all_similarities: list[dict]        # [{region_name, similarity}] sorted desc
     query: str
+    normalized_query: str               # query after stripping normative constructions
     processing_time_s: float
     cached: bool = False
 
@@ -83,6 +84,8 @@ class YoloCLIPAnalyzer:
                 result = YoloCLIPResult(**{**cached.__dict__, "cached": True})
                 return result
 
+        norm_query = self._normalize_query(query)
+
         yolo_boxes, grid_pairs = self.detector.get_all_crops(pil_image)
 
         # Combine all crops: YOLO detections first, then grid zones
@@ -97,7 +100,7 @@ class YoloCLIPAnalyzer:
             all_crops.append(crop)
             all_names.append(name)
 
-        match_result = self.matcher.match(all_crops, all_names, query)
+        match_result = self.matcher.match(all_crops, all_names, norm_query)
 
         label = 1 if match_result.best_similarity >= self.threshold else 0
         verdict = self.VERDICTS[label]
@@ -148,6 +151,7 @@ class YoloCLIPAnalyzer:
             best_similarity=match_result.best_similarity,
             all_similarities=all_sims,
             query=query,
+            normalized_query=norm_query,
             processing_time_s=elapsed,
             cached=False,
         )
@@ -223,6 +227,33 @@ class YoloCLIPAnalyzer:
             import io
             return Image.open(io.BytesIO(source)).convert("RGB")
         raise TypeError(f"Unsupported image source type: {type(source)}")
+
+    @staticmethod
+    def _normalize_query(query: str) -> str:
+        """Strip Russian normative/modal constructions so CLIP gets a visual description.
+
+        Examples:
+            'Шахматный узор должен быть справа'       → 'Шахматный узор справа'
+            'Логотип должен находиться в центре'       → 'Логотип в центре'
+            'Шахматный узор должен отсутствовать'      → 'Шахматный узор'
+            'Необходимо наличие синей полосы сверху'   → 'наличие синей полосы сверху'
+        """
+        import re
+        patterns = [
+            # "должен/должна/должно/должны" + following verb (infinitive)
+            r'должен\s+\w+',
+            r'должна\s+\w+',
+            r'должно\s+\w+',
+            r'должны\s+\w+',
+            # standalone modal words (if no verb was matched)
+            r'должен', r'должна', r'должно', r'должны',
+            r'необходимо', r'нужно', r'следует', r'требуется', r'надо',
+        ]
+        result = query
+        for p in patterns:
+            result = re.sub(p, '', result, flags=re.IGNORECASE)
+        result = re.sub(r'\s+', ' ', result).strip()
+        return result or query  # fallback to original if everything was stripped
 
     @staticmethod
     def _cache_key(image: Union[bytes, str, Path, Image.Image], query: str) -> str:

@@ -466,6 +466,7 @@ async def analyze_v2(
         best_similarity=result.best_similarity,
         all_similarities=[SimilarityEntry(**s) for s in result.all_similarities],
         query=result.query,
+        normalized_query=result.normalized_query,
         processing_time_s=result.processing_time_s,
         cached=result.cached,
     )
